@@ -1,107 +1,147 @@
-from tkinter import *
-from datetime import datetime
+import re
+from PyQt6 import uic
+from PyQt6.QtWidgets import QApplication, QMainWindow
+from PyQt6.QtCore import QTimer
+from atexit import register
+from os.path import isfile
+from pickle import dump, load
 
-def fas():
-    """
-    发送消息
-    :return: None
-    """
-    text = sendmsg.get(1.0, END).rstrip()
-    # 清空
-    sendmsg.delete(1.0, END)
-    messages.append(text)
-    msg["state"] = NORMAL
-    now = datetime.now()
-    # 类似于 html 的 class 属性，便捷地设置标签
-    msg.insert(END, f"{username}", "user")
-    msg.insert(END, f" 发表于 {now.strftime('%Y-%m-%d %H:%M:%S')}", "time")
-    msg.insert(END, "\n")
-    msg.insert(END, text)
-    msg.insert(END, "\n\n")
-    msg["state"] = DISABLED
-    sendb["state"] = DISABLED
+if not isfile("users"):
+    with open("users", "w") as f:
+        pass
 
-def check(ev):
-    """
-    检查
-    :param ev: event(from tk)
-    :return: None
-    """
-    if sendmsg.get(1.0, END).strip():
-        sendb["state"] = NORMAL
-    else:
-        sendb["state"] = DISABLED
+if not isfile("messages"):
+    with open("messages", "wb") as f:
+        dump([], f)
 
-def change():
-    """
-    更改用户名，差不多就是切换用户
-    :return: None
-    """
-    func = lambda: changeto(entry, top)
-    top = Toplevel()
-    top.title("输入你的新用户名")
-    top.geometry('300x50+150+150')
-    entry = Entry(top, font=font)
-    entry.grid(row=0, column=0)
-    cfm = Button(top, text="确定(Enter)", font=font, width=10, height=1)
-    cfm["command"] = func
-    cfm.grid(row=0, column=1)
-    top.bind("<KeyPress-Return>", lambda x: func())
-    top.mainloop()
+class Message:
+    def __init__(self, user, content):
+        self.user = user
+        self.content = content
+    
+    def __repr__(self):
+        return f"Message({self.user}, {self.content})"
 
-def changeto(entry, top):
-    global username
-    username = entry.get()
-    top.destroy()
-    uss["text"] = f"当前用户名：{username}"
+    def __str__(self):
+        return f"{self.user}: {self.content}"
 
-# 消息
-messages = []
+    def info(self):
+        return (self.user, self.content)
 
-root = Tk()
-root.geometry("700x700+100+100")
-root.title("This Chat V1.0 - Powered by dddddgz")
+form_class = uic.loadUiType("ThisChat.ui")[0]
 
-# 通用的字体
-font = ("Microsoft Yahei UI", 11)
+class ThisChat(QMainWindow, form_class):
+    def __init__(self):
+        super().__init__()
+        self.setupUi(self)
+        register(lambda: self.del_user(self.username))
+        self.set1 = [
+            self.label1,
+            self.label2,
+            self.now,
+            self.sendmsg,
+            self.tb,
+            self.name,
+            self.users
+        ]
+        self.set2 = [
+            self.label3,
+            self.uncf,
+            self.un
+        ]
+        for each in self.set1:
+            each.setVisible(False)
+        self.sendmsg.clicked.connect(self.send)
+        self.uncf.clicked.connect(self.confirmUsername)
+        self.username = None
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.updateAll)
+        self.timer.start(1000)
 
-# 用户名
-username = "TestUser"
+    def send(self):
+        text = self.now.text().rstrip()
+        if text.startswith("/"):
+            temp = re.match(r"^/ban @(.*?);$", text)
+            if temp:
+                user = temp.group(1)
+                self.ban(user)
+        self.add_message(self.username, text)
 
-# username shower
-uss = Label(root, text=f"当前用户名：{username}", font=font)
-uss.grid(row=1, column=1)
+    def confirmUsername(self):
+        username = self.un.text().strip()
+        if username == '' or username in self.get_users():
+            return
+        for each in self.set1:
+            each.setVisible(True)
+        for each in self.set2:
+            each.setVisible(False)
+        self.username = username
+        self.name.setText(username)
+        self.add_user(username)
 
-# username editor
-use = Button(root, text="更改用户名", font=font)
-use["command"] = change
-use.grid(row=1, column=2)
+    def ban(self, user):
+        if user in self.get_users():
+            self.del_user(user)
+            self.add_message("Robot", f"✅User banned: {user}")
+        else:
+            self.add_message("Robot", f"❌User does not exist")
 
-label = Label(root, text="历史消息", font=font)
-label.grid(row=1, column=0, sticky=W)
+    def add_user(self, username):
+        users = self.get_users()
+        with open("users", "w", encoding="utf-8") as f:
+            users.append(username)
+            f.write("\n".join(users))
 
-# 历史消息
-msg = Text(root, width=50, height=20, font=font)
-msg["state"] = DISABLED
-msg.tag_config("user", foreground="green", font=font + ("bold", ))
-msg.tag_config("time", foreground="blue", font=font)
-msg.grid(row=2, column=0)
+    def get_users(self):
+        with open("users", "r", encoding="utf-8") as f:
+            users = f.read().splitlines()
+            return users
+    
+    def del_user(self, username):
+        try:
+            users = self.get_users()
+            users.remove(username)
+            with open("users", "w", encoding="utf-8") as f:
+                f.write("\n".join(users))
+        except:
+            pass
+    
+    def add_message(self, username, content):
+        message = Message(username, content)
+        messages = self.get_messages()
+        messages.append(message)
+        with open("messages", "wb") as f:
+            dump(messages, f)
+    
+    def get_messages(self):
+        with open("messages", "rb") as f:
+            return load(f)
 
-label = Label(root, text="发送消息", font=font)
-label.grid(row=3, column=0, sticky=W)
+    def update_userlist(self):
+        users = [each.rstrip("\n") for each in self.get_users()]
+        self.users.clear()
+        for user in users:
+            self.users.append(user)
+    
+    def update_messages(self):
+        messages = self.get_messages()
+        self.tb.clear()
+        for message in messages:
+            info = message.info()
+            self.tb.append(f"<b><span style='color: green;'>{info[0]}</span></b>:")
+            self.tb.append(f"<span style='color: black;'>{info[1]}</span>")
+    
+    def check_ban(self):
+        if self.username and self.username not in self.get_users():
+            self.close()
 
-# 消息编辑区
-sendmsg = Text(root, width=50, height=4, font=font)
-sendmsg.grid(row=4, column=0)
+    def updateAll(self):
+        self.check_ban()
+        self.update_userlist()
+        self.update_messages()
 
-# 消息发送按钮
-sendb = Button(root, width=20, height=1, font=font, text="发送消息(Ctrl+Enter)")
-sendb["command"] = fas
-sendb["state"] = DISABLED
-sendb.grid(row=4, column=1, sticky=W, columnspan=2)
-
-# 每次一按下键就检测是否应该更改 sendb 的状态为 NORMAL 或 DISABLED
-root.bind("<KeyPress>", check)
-
-root.bind("<Control-KeyPress-Return>", lambda x: fas())
-root.mainloop()
+if __name__ == "__main__":
+    app = QApplication([])
+    thischat = ThisChat()
+    thischat.show()
+    app.exec()
